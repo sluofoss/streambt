@@ -19,5 +19,8 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "jupyterlab>=4.3.5",
+    "matplotlib>=3.10.1",
+    "memory-profiler>=0.61.0",
     "pyarrow>=19.0.1",
 ]
