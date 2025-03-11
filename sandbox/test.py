@@ -80,7 +80,7 @@ t = time.time()
 import math
 from operator import add
 from functools import reduce
-    
+import re
 
 """ TODO need to adjust this such that the formula can correctly shrink when not enough for data for lookback
  why? 
@@ -90,10 +90,11 @@ from functools import reduce
     3.1 currently it would result in null value for those period instead. 
 
 """
-def ema(column:str,period:int=14,type='standard',window=Window.partitionBy("Ticker").orderBy("Date")):
+def ema(column:str,period:int=14,type='standard',window=Window.partitionBy("Ticker").orderBy("Date"),debug=False,use_period_as_lookback=False):
     """
     rollout calc
     weight check
+        r is smoothing rate
         r, (1-r)
         r, (1-r)*r, (1-r)^2
         ...
@@ -102,10 +103,13 @@ def ema(column:str,period:int=14,type='standard',window=Window.partitionBy("Tick
     the only thing lost would be information lost before than many step, 
     hence what's outside of lookback would contribute of only 0.001 precision within the EMA  
 
-    decay^x<0.01
-    x*lg(decay)<lg(0.01)
-    x<lg(0.01)/lg(decay)
+    decay^x/weigh<0.01
+    x*lg(decay)<lg(0.01*weigh)
+    x<lg(0.01*weigh)/lg(decay)
+    
+    correctly accounting weigh actual making lookback larger. this would be very problematic. there needs to be a way to effectively do recursion/ema!
     """
+    precision = 0.999999
     #period = 14
     if type == 'standard':
         decay = (period-1)/(period+1)
@@ -113,12 +117,25 @@ def ema(column:str,period:int=14,type='standard',window=Window.partitionBy("Tick
     elif type == 'wiler':
         decay = (period-1)/period
         weigh = 1/period
-    lookback =  math.ceil(math.log(0.001)/math.log(decay))
+    
+    lookback =  math.ceil(math.log(precision*weigh)/math.log(decay)) if use_period_as_lookback is False else period
+    if debug:
+        print("compare lookback")
+        print(period,lookback)
+        all_w1 = [weigh]+[decay ** (p + 1) * weigh for p in range(period)]
+        all_w1[-1] /= weigh
+        print(all_w1) 
+        all_w2 = [weigh]+[decay ** (p + 1) * weigh for p in range(math.ceil(math.log(precision*weigh)/math.log(decay)))]
+        all_w2[-1] /= weigh
+        print(all_w2)
+        
+        print(sum(all_w2[len(all_w1):]))
 
+        print("finish compare")
     #for p in range(lookback):
     #    lv2 = lv2.withColumn(column+'_lw'+str(p),lag(column,p+1).over(window)* ((decay)**(p+1)) )
-    lagged_terms = [
-        (lag(F.col(column), p + 1).over(window) * (decay ** (p + 1))).alias(f"{column}_lw{p}")
+    lagged_terms = [F.col(column)]+[
+        (lag(F.col(column), p + 1).over(window) * (decay ** (p + 1))).alias(f"{column}_{period}_lw{p}")
         for p in range(lookback)
     ]
     #c1 = "+".join([column+'_lw'+str(p) for p in range(lookback)])
@@ -126,32 +143,49 @@ def ema(column:str,period:int=14,type='standard',window=Window.partitionBy("Tick
     #return df.withColumns('ema_'+column,expr)
     # https://stackoverflow.com/questions/44502095/summing-multiple-columns-in-spark
     expr = reduce(add, [col if i<len(lagged_terms) else col/weigh for i,col in enumerate(lagged_terms,1)])
-    return weigh*expr
+
+    if debug:
+        print(period, decay, weigh)
+        all_w = [1]+[decay ** (p + 1) for p in range(lookback)]
+        all_w[-1] /= weigh
+        print(sum(all_w)*weigh, all_w) 
+        return {f'ema_{column}_{period}':weigh*expr, **{str(t)[-10:]:t for t in lagged_terms}}
+    else:
+        return weigh*expr
 
 #expression = "(_ad+" + c1 + ")/(Volume+" + c2 + ")"
 #print(expression)
 
 # calculating TMF with WMA
 w = Window.partitionBy("Ticker").orderBy("Date")
-#lv2 = lv1 \
+lv2 = lv1
+#lv2 = lv2 \
 #    .withColumn("_close_yesterday", lag("Close").over(w)) \
 #    .withColumn("_trh",greatest("High","_close_yesterday")) \
 #    .withColumn("_trl",least("Low","_close_yesterday")) \
 #    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) \
 #    .withColumn("ema_ad", ema("_ad",period=14,type="wiler")) \
-#    .withColumn("ema_volume", ema("Volume",period=14,type="wiler"))
-#
-#lv2 = lv2.withColumn("TMF", F.col("ema_ad")/F.col("ema_volume"))#.drop(*(["_ad_lw"+str(p) for p in range(lookback)]+["_Volume_lw"+str(p) for p in range(lookback)]))
+#    .withColumn("ema_volume", ema("Volume",period=14,type="wiler")) \
+#    .withColumn("TMF", F.col("ema_ad")/F.col("ema_volume"))#.drop(*(["_ad_lw"+str(p) for p in range(lookback)]+["_Volume_lw"+str(p) for p in range(lookback)]))
 
 
 # calculating MACD
-lv2 = lv2 \
-    .withColumn("ema_close_12", ema("Close",period=12)) \
-    .withColumn("ema_close_26", ema("Close",period=26)) \
-    .withColumn("macd", F.col("ema_close_12")-F.col("ema_close_26")) \
-    .withColumn("macd_signal", ema("macd",period=9))
 
+lv2 = lv1.withColumns(ema("Close",period=5,debug=True)).withColumns(ema("Close",period=10,debug=True))
 
+#lv2 = lv2 \
+#    .withColumn("ema_close_12", ema("Close",period=12)) \
+#    .withColumn("ema_close_26", ema("Close",period=26)) \
+#    .withColumn("macd", F.col("ema_close_12")-F.col("ema_close_26")) \
+#    .withColumn("macd_signal", ema("macd",period=9))
+
+# TODO, too large a period cause it to break, *10 *20 does not work.
+# time to compare the performance difference between using lookback at different precision rate (0.001 vs 0.1 vs plain period)
+#lv2 = lv2 \
+#    .withColumn("ema_close_12_20", ema("Close",period=12*20)) \
+#    .withColumn("ema_close_26_20", ema("Close",period=26*20)) \
+#    .withColumn("macd_20", F.col("ema_close_12_20")-F.col("ema_close_26_20")) \
+#    .withColumn("macd_signal_20", ema("macd_20",period=9*20))
 
 
 #lv2.where(lv2.Ticker == 'CBA.AX').show(300)
