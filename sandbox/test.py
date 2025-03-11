@@ -66,13 +66,6 @@ from pyspark.sql.functions import row_number, lag, greatest, expr, least
 #lv3 = lv2.where(lv2.Ticker == 'CBA.AX').collect()
 
 #lv3.orderBy("Date").show()
-w = Window.partitionBy("Ticker").orderBy("Date")
-lv2 = lv1 \
-    .withColumn("_close_yesterday", lag("Close").over(w)) \
-    .withColumn("_trh",greatest("High","_close_yesterday")) \
-    .withColumn("_trl",least("Low","_close_yesterday")) \
-    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) 
-
 
 # approximating ema with wma with defined precision
 import time
@@ -83,24 +76,82 @@ def update_time(t):
 
 t = time.time()
 
-period = 14
-decay = (period-1)/period
-import math
-lookback =  math.ceil(math.log(0.001)/math.log(decay))
-#decay^x<0.01
-#x*lg(decay)<lg(0.01)
-#x<lg(0.01)/lg(decay)
-#lookback = 4
-for p in range(lookback):
-    lv2 = lv2.withColumn("_ad_lw"+str(p),lag("_ad",p+1).over(w)* ((decay)**(p+1)) ) \
-             .withColumn("_Volume_lw"+str(p),lag("Volume",p+1).over(w)* ((decay)**(p+1)) )
-             #.withColumn("Close"+str(p),lag("_ad",p+1).over(w)* ((decay)**(p+1)) )
 
-c1 = "+".join(["_ad_lw"+str(p) for p in range(lookback)])
-c2 = "+".join(["_Volume_lw"+str(p) for p in range(lookback)]) 
-expression = "(_ad+" + c1 + ")/(Volume+" + c2 + ")"
+import math
+from operator import add
+from functools import reduce
+    
+
+""" TODO need to adjust this such that the formula can correctly shrink when not enough for data for lookback
+ why? 
+ 1. the weight always sum to 1
+ 2. more data
+ 3. enable usage for larger period in ema
+    3.1 currently it would result in null value for those period instead. 
+
+"""
+def ema(column:str,period:int=14,type='standard',window=Window.partitionBy("Ticker").orderBy("Date")):
+    """
+    rollout calc
+    weight check
+        r, (1-r)
+        r, (1-r)*r, (1-r)^2
+        ...
+        r(1,(1-r), ... ,(1-r)^n/r)
+    sum of weight would always be 1
+    the only thing lost would be information lost before than many step, 
+    hence what's outside of lookback would contribute of only 0.001 precision within the EMA  
+
+    decay^x<0.01
+    x*lg(decay)<lg(0.01)
+    x<lg(0.01)/lg(decay)
+    """
+    #period = 14
+    if type == 'standard':
+        decay = (period-1)/(period+1)
+        weigh = 2/(period+1)
+    elif type == 'wiler':
+        decay = (period-1)/period
+        weigh = 1/period
+    lookback =  math.ceil(math.log(0.001)/math.log(decay))
+
+    #for p in range(lookback):
+    #    lv2 = lv2.withColumn(column+'_lw'+str(p),lag(column,p+1).over(window)* ((decay)**(p+1)) )
+    lagged_terms = [
+        (lag(F.col(column), p + 1).over(window) * (decay ** (p + 1))).alias(f"{column}_lw{p}")
+        for p in range(lookback)
+    ]
+    #c1 = "+".join([column+'_lw'+str(p) for p in range(lookback)])
+    #expr = "".join([str(weigh),"*(",column, "+", c1, "/", str(weigh), ")"])
+    #return df.withColumns('ema_'+column,expr)
+    # https://stackoverflow.com/questions/44502095/summing-multiple-columns-in-spark
+    expr = reduce(add, [col if i<len(lagged_terms) else col/weigh for i,col in enumerate(lagged_terms,1)])
+    return weigh*expr
+
+#expression = "(_ad+" + c1 + ")/(Volume+" + c2 + ")"
 #print(expression)
-lv2 = lv2.withColumn("TMF", expr(expression))#.drop(*(["_ad_lw"+str(p) for p in range(lookback)]+["_Volume_lw"+str(p) for p in range(lookback)]))
+
+# calculating TMF with WMA
+w = Window.partitionBy("Ticker").orderBy("Date")
+#lv2 = lv1 \
+#    .withColumn("_close_yesterday", lag("Close").over(w)) \
+#    .withColumn("_trh",greatest("High","_close_yesterday")) \
+#    .withColumn("_trl",least("Low","_close_yesterday")) \
+#    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) \
+#    .withColumn("ema_ad", ema("_ad",period=14,type="wiler")) \
+#    .withColumn("ema_volume", ema("Volume",period=14,type="wiler"))
+#
+#lv2 = lv2.withColumn("TMF", F.col("ema_ad")/F.col("ema_volume"))#.drop(*(["_ad_lw"+str(p) for p in range(lookback)]+["_Volume_lw"+str(p) for p in range(lookback)]))
+
+
+# calculating MACD
+lv2 = lv2 \
+    .withColumn("ema_close_12", ema("Close",period=12)) \
+    .withColumn("ema_close_26", ema("Close",period=26)) \
+    .withColumn("macd", F.col("ema_close_12")-F.col("ema_close_26")) \
+    .withColumn("macd_signal", ema("macd",period=9))
+
+
 
 
 #lv2.where(lv2.Ticker == 'CBA.AX').show(300)
