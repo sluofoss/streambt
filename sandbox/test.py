@@ -1,24 +1,27 @@
 import pyspark
 #from ta.momentum import RSIIndicator
+#import pyspark.pandas
+#import pyspark.pandas.window
 from talib import RSI
 from pyspark.sql.functions import pandas_udf, PandasUDFType, to_date, from_unixtime
 import pyspark.sql.functions as F
 from pyspark.sql.types import FloatType
 import pandas as pd
+from ema import ema_w, ema_w_a
 
 if __name__ == "__main__":
     # Convert to a Spark DataFrame
     from pyspark.sql import SparkSession
-    from pyspark.sql import functions as F
-
+    
     spark = SparkSession.builder \
-    .master("local") \
+    .master("local[6]") \
     .appName("udf") \
     .config("spark.driver.extraJavaOptions", "-Dio.netty.tryReflectionSetAccessible=true") \
     .config("spark.executor.extraJavaOptions", "-Dio.netty.tryReflectionSetAccessible=true") \
     .config("spark.sql.execution.arrow.enabled", "true") \
     .config("spark.sql.legacy.parquet.nanosAsLong", "true") \
     .config("spark.python.profile.memory", "true") \
+    .config("spark.driver.memory", "8g") \
     .getOrCreate()
     #spark://<your master endpoint>
 
@@ -59,7 +62,7 @@ lv1 = df \
 
 from pyspark.sql import Window
 from pyspark.sql.functions import row_number, lag, greatest, expr, least
-#window = Window.partitionBy("Ticker").orderBy("Date") 
+window = Window.partitionBy("Ticker").orderBy("Date") 
 
 #lv2 = lv1.withColumn("RSI",calculate_rsi(F.col("Close")).over(window)).collect()
 
@@ -77,9 +80,7 @@ def update_time(t):
 t = time.time()
 
 
-import math
-from operator import add
-from functools import reduce
+
 import re
 
 """ TODO need to adjust this such that the formula can correctly shrink when not enough for data for lookback
@@ -90,68 +91,6 @@ import re
     3.1 currently it would result in null value for those period instead. 
 
 """
-def ema(column:str,period:int=14,type='standard',window=Window.partitionBy("Ticker").orderBy("Date"),debug=False,use_period_as_lookback=False):
-    """
-    rollout calc
-    weight check
-        r is smoothing rate
-        r, (1-r)
-        r, (1-r)*r, (1-r)^2
-        ...
-        r(1,(1-r), ... ,(1-r)^n/r)
-    sum of weight would always be 1
-    the only thing lost would be information lost before than many step, 
-    hence what's outside of lookback would contribute of only 0.001 precision within the EMA  
-
-    decay^x/weigh<0.01
-    x*lg(decay)<lg(0.01*weigh)
-    x<lg(0.01*weigh)/lg(decay)
-    
-    correctly accounting weigh actual making lookback larger. this would be very problematic. there needs to be a way to effectively do recursion/ema!
-    """
-    precision = 0.999999
-    #period = 14
-    if type == 'standard':
-        decay = (period-1)/(period+1)
-        weigh = 2/(period+1)
-    elif type == 'wiler':
-        decay = (period-1)/period
-        weigh = 1/period
-    
-    lookback =  math.ceil(math.log(precision*weigh)/math.log(decay)) if use_period_as_lookback is False else period
-    if debug:
-        print("compare lookback")
-        print(period,lookback)
-        all_w1 = [weigh]+[decay ** (p + 1) * weigh for p in range(period)]
-        all_w1[-1] /= weigh
-        print(all_w1) 
-        all_w2 = [weigh]+[decay ** (p + 1) * weigh for p in range(math.ceil(math.log(precision*weigh)/math.log(decay)))]
-        all_w2[-1] /= weigh
-        print(all_w2)
-        
-        print(sum(all_w2[len(all_w1):]))
-
-        print("finish compare")
-    #for p in range(lookback):
-    #    lv2 = lv2.withColumn(column+'_lw'+str(p),lag(column,p+1).over(window)* ((decay)**(p+1)) )
-    lagged_terms = [F.col(column)]+[
-        (lag(F.col(column), p + 1).over(window) * (decay ** (p + 1))).alias(f"{column}_{period}_lw{p}")
-        for p in range(lookback)
-    ]
-    #c1 = "+".join([column+'_lw'+str(p) for p in range(lookback)])
-    #expr = "".join([str(weigh),"*(",column, "+", c1, "/", str(weigh), ")"])
-    #return df.withColumns('ema_'+column,expr)
-    # https://stackoverflow.com/questions/44502095/summing-multiple-columns-in-spark
-    expr = reduce(add, [col if i<len(lagged_terms) else col/weigh for i,col in enumerate(lagged_terms,1)])
-
-    if debug:
-        print(period, decay, weigh)
-        all_w = [1]+[decay ** (p + 1) for p in range(lookback)]
-        all_w[-1] /= weigh
-        print(sum(all_w)*weigh, all_w) 
-        return {f'ema_{column}_{period}':weigh*expr, **{str(t)[-10:]:t for t in lagged_terms}}
-    else:
-        return weigh*expr
 
 #expression = "(_ad+" + c1 + ")/(Volume+" + c2 + ")"
 #print(expression)
@@ -159,25 +98,48 @@ def ema(column:str,period:int=14,type='standard',window=Window.partitionBy("Tick
 # calculating TMF with WMA
 w = Window.partitionBy("Ticker").orderBy("Date")
 lv2 = lv1
-#lv2 = lv2 \
-#    .withColumn("_close_yesterday", lag("Close").over(w)) \
-#    .withColumn("_trh",greatest("High","_close_yesterday")) \
-#    .withColumn("_trl",least("Low","_close_yesterday")) \
-#    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) \
-#    .withColumn("ema_ad", ema("_ad",period=14,type="wiler")) \
-#    .withColumn("ema_volume", ema("Volume",period=14,type="wiler")) \
-#    .withColumn("TMF", F.col("ema_ad")/F.col("ema_volume"))#.drop(*(["_ad_lw"+str(p) for p in range(lookback)]+["_Volume_lw"+str(p) for p in range(lookback)]))
+lv2 = lv2 \
+    .withColumn("_close_yesterday", lag("Close").over(w)) \
+    .withColumn("_trh",greatest("High","_close_yesterday")) \
+    .withColumn("_trl",least("Low","_close_yesterday")) \
+    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) \
+    .withColumn("ema_ad", ema_w("_ad",period=14,type="wiler")) \
+    .withColumn("ema_volume", ema_w("Volume",period=14,type="wiler")) \
+    .withColumn("TMF_w", F.col("ema_ad")/F.col("ema_volume")) \
+    .withColumn("ema_ad_wa", ema_w_a("_ad",period=14,type="wiler")) \
+    .withColumn("ema_volume_wa", ema_w_a("Volume",period=14,type="wiler")) \
+    .withColumn("TMF_wa", F.col("ema_ad_wa")/F.col("ema_volume_wa")) \
+    .withColumn("TMF_4w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-4*5,0)) ) \
+    .withColumn("TMF_8w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-8*5,0)) ) \
+    .withColumn("TMF_26w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-26*5,0)) ) \
+    .withColumn("TMF_26w_min_dd", F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w) ) \
+
+
+
+
+#.drop(*(["_ad_lw"+str(p) for p in range(lookback)]+["_Volume_lw"+str(p) for p in range(lookback)]))
 
 
 # calculating MACD
 
-lv2 = lv1.withColumns(ema("Close",period=5,debug=True)).withColumns(ema("Close",period=10,debug=True))
+#lv2 = lv1.withColumns(ema("Close",period=5,debug=True)).withColumns(ema("Close",period=10,debug=True))
 
-#lv2 = lv2 \
-#    .withColumn("ema_close_12", ema("Close",period=12)) \
-#    .withColumn("ema_close_26", ema("Close",period=26)) \
-#    .withColumn("macd", F.col("ema_close_12")-F.col("ema_close_26")) \
-#    .withColumn("macd_signal", ema("macd",period=9))
+lv2 = lv2 \
+    .withColumn("ema_close_12", ema_w("Close",period=12)) \
+    .withColumn("ema_close_26", ema_w("Close",period=26)) \
+    .withColumn("macd", F.col("ema_close_12")-F.col("ema_close_26")) \
+    .withColumn("macd_signal", ema_w("macd",period=9))
+
+
+lv2 = lv2 \
+    .withColumn("ema_close_12_wa", ema_w_a("Close",period=12)) \
+    .withColumn("ema_close_26_wa", ema_w_a("Close",period=26)) \
+    .withColumn("macd_wa", F.col("ema_close_12_wa")-F.col("ema_close_26_wa")) \
+    .withColumn("macd_signal_wa", ema_w_a("macd_wa",period=9))
+
+#lv2 = lv2.withColumn('true_ema',.mean())
+
+
 
 # TODO, too large a period cause it to break, *10 *20 does not work.
 # time to compare the performance difference between using lookback at different precision rate (0.001 vs 0.1 vs plain period)
@@ -187,7 +149,8 @@ lv2 = lv1.withColumns(ema("Close",period=5,debug=True)).withColumns(ema("Close",
 #    .withColumn("macd_20", F.col("ema_close_12_20")-F.col("ema_close_26_20")) \
 #    .withColumn("macd_signal_20", ema("macd_20",period=9*20))
 
-
+#recs = lv2.collect()
+lv2.write.csv('full_df_debug.csv',header=True, mode="overwrite")
 #lv2.where(lv2.Ticker == 'CBA.AX').show(300)
 lv2.where(lv2.Ticker == 'CBA.AX').write.csv('cba_debug.csv',header=True, mode="overwrite")
 #lv1.withColumn("_close_yesterday")
