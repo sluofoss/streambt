@@ -7,7 +7,7 @@ from pyspark.sql.functions import pandas_udf, PandasUDFType, to_date, from_unixt
 import pyspark.sql.functions as F
 from pyspark.sql.types import FloatType
 import pandas as pd
-from ema import ema_w, ema_w_a
+from ema import ema_w, ema_w_a, ema_w_a_hof
 
 if __name__ == "__main__":
     # Convert to a Spark DataFrame
@@ -95,50 +95,66 @@ import re
 #expression = "(_ad+" + c1 + ")/(Volume+" + c2 + ")"
 #print(expression)
 
+# --------------------
 # calculating TMF with WMA
+# --------------------
+
 w = Window.partitionBy("Ticker").orderBy("Date")
 lv2 = lv1
-lv2 = lv2 \
-    .withColumn("_close_yesterday", lag("Close").over(w)) \
-    .withColumn("_trh",greatest("High","_close_yesterday")) \
-    .withColumn("_trl",least("Low","_close_yesterday")) \
-    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) \
-    .withColumn("ema_ad", ema_w("_ad",period=14,type="wiler")) \
-    .withColumn("ema_volume", ema_w("Volume",period=14,type="wiler")) \
-    .withColumn("TMF_w", F.col("ema_ad")/F.col("ema_volume")) \
-    .withColumn("ema_ad_wa", ema_w_a("_ad",period=14,type="wiler")) \
-    .withColumn("ema_volume_wa", ema_w_a("Volume",period=14,type="wiler")) \
-    .withColumn("TMF_wa", F.col("ema_ad_wa")/F.col("ema_volume_wa")) \
-    .withColumn("TMF_4w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-4*5,0)) ) \
-    .withColumn("TMF_8w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-8*5,0)) ) \
-    .withColumn("TMF_26w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-26*5,0)) ) \
-    .withColumn("TMF_26w_min_dd", F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w) ) \
+#lv2 = lv2 \
+#    .withColumn("_close_yesterday", lag("Close").over(w)) \
+#    .withColumn("_trh",greatest("High","_close_yesterday")) \
+#    .withColumn("_trl",least("Low","_close_yesterday")) \
+#    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) \
+#    .withColumn("ema_ad", ema_w("_ad",period=14,type="wiler")) \
+#    .withColumn("ema_volume", ema_w("Volume",period=14,type="wiler")) \
+#    .withColumn("TMF_w", F.col("ema_ad")/F.col("ema_volume")) \
+#    .withColumn("ema_ad_wa", ema_w_a("_ad",period=14,type="wiler")) \
+#    .withColumn("ema_volume_wa", ema_w_a("Volume",period=14,type="wiler")) \
+#    .withColumn("TMF_wa", F.col("ema_ad_wa")/F.col("ema_volume_wa")) \
+#    .withColumn("TMF_4w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-4*5,0)) ) \
+#    .withColumn("TMF_8w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-8*5,0)) ) \
+#    .withColumn("TMF_26w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-26*5,0)) ) \
+#    .withColumn("TMF_26w_min_dd", F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w) ) \
 
 
 
 
 #.drop(*(["_ad_lw"+str(p) for p in range(lookback)]+["_Volume_lw"+str(p) for p in range(lookback)]))
 
-
+# --------------------
 # calculating MACD
+# --------------------
 
 #lv2 = lv1.withColumns(ema("Close",period=5,debug=True)).withColumns(ema("Close",period=10,debug=True))
 
-lv2 = lv2 \
-    .withColumn("ema_close_12", ema_w("Close",period=12)) \
-    .withColumn("ema_close_26", ema_w("Close",period=26)) \
-    .withColumn("macd", F.col("ema_close_12")-F.col("ema_close_26")) \
-    .withColumn("macd_signal", ema_w("macd",period=9))
+#lv2 = lv2 \
+#    .withColumn("ema_close_12", ema_w("Close",period=12)) \
+#    .withColumn("ema_close_26", ema_w("Close",period=26)) \
+#    .withColumn("macd", F.col("ema_close_12")-F.col("ema_close_26")) \
+#    .withColumn("macd_signal", ema_w("macd",period=9))
 
 
+#lv2 = lv2 \
+#    .withColumn("ema_close_12_wa", ema_w_a("Close",period=12)) \
+#    .withColumn("ema_close_26_wa", ema_w_a("Close",period=26)) \
+#    .withColumn("macd_wa", F.col("ema_close_12_wa")-F.col("ema_close_26_wa")) \
+#    .withColumn("macd_signal_wa", ema_w_a("macd_wa",period=9))
+
 lv2 = lv2 \
-    .withColumn("ema_close_12_wa", ema_w_a("Close",period=12)) \
-    .withColumn("ema_close_26_wa", ema_w_a("Close",period=26)) \
-    .withColumn("macd_wa", F.col("ema_close_12_wa")-F.col("ema_close_26_wa")) \
-    .withColumn("macd_signal_wa", ema_w_a("macd_wa",period=9))
+    .withColumn("ema_close_12_hof", ema_w_a_hof("Close",period=12)) \
+    .withColumn("ema_close_26_hof", ema_w_a_hof("Close",period=26)) \
+    .withColumn("macd_hof", F.col("ema_close_12_hof")-F.col("ema_close_26_hof")) \
+    .withColumn("macd_signal_hof", ema_w_a_hof("macd_hof",period=9))
 
 #lv2 = lv2.withColumn('true_ema',.mean())
 
+# --------------------
+# calculating exit result for all points
+# --------------------
+
+#lv2 = lv2 \
+#    .withColumn("over_gain_thres",F.lag)
 
 
 # TODO, too large a period cause it to break, *10 *20 does not work.
@@ -150,9 +166,13 @@ lv2 = lv2 \
 #    .withColumn("macd_signal_20", ema("macd_20",period=9*20))
 
 #recs = lv2.collect()
-lv2.write.csv('full_df_debug.csv',header=True, mode="overwrite")
+
+# export full thing
+#lv2.write.csv('full_df_debug.csv',header=True, mode="overwrite")
+
+
 #lv2.where(lv2.Ticker == 'CBA.AX').show(300)
-lv2.where(lv2.Ticker == 'CBA.AX').write.csv('cba_debug.csv',header=True, mode="overwrite")
+lv2.where(lv2.Ticker == 'CBA.AX').write.csv('cba_debug_2.csv',header=True, mode="overwrite")
 #lv1.withColumn("_close_yesterday")
 t = update_time(t)
 

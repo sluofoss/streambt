@@ -60,21 +60,28 @@ if __name__ == "__main__":
     lookback =  math.ceil(math.log(precision)/math.log(decay))
     print(lookback)
     # Collect values into an ordered array
-    df_with_array = df.withColumn(
-        "ordered_values",
-        F.aggregate(
-            F.transform(
-                F.array_agg(F.col(column)).over(window.rowsBetween(-lookback,0)),
-                lambda x,i: 
-                    F.when( 
-                        i==0, 
-                        x*F.lit(decay)**F.lit(lookback)/F.lit(weigh) 
-                    ).otherwise(x*F.lit(decay)**F.lit(lookback-i))
-            ).alias("_tmp"),
-            F.lit(0.0),
-            lambda acc,x: acc+x,
-            lambda x: x*weigh
-        )
+    collected = F.transform(
+            F.array_agg(F.col(column)).over(window.rowsBetween(-lookback,0)),
+            lambda x,i: 
+                F.when( 
+                    i==0, 
+                    x*F.lit(decay)**F.lit(lookback)/F.lit(weigh) 
+                ).otherwise(x*F.lit(decay)**F.lit(lookback-i))
+    ).alias("_tmp")
+    
+    raw_val = F.aggregate(
+        collected,
+        F.lit(0.0),
+        lambda acc,x: acc+x,
+        lambda x: x*weigh
     )
+
+    filtered_val = F.when(F.size(collected)==(lookback+1),raw_val).otherwise(F.lit(None))
+
+    df_with_array = df.withColumn(
+        "filtered_val",
+        filtered_val
+    )
+    
 
     df_with_array.show(truncate=False)

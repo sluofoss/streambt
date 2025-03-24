@@ -13,20 +13,27 @@ def ema_w(column:str,period:int=14,type='standard',window=None,debug=False,use_p
         r, (1-r)
         r, (1-r)*r, (1-r)^2
         ...
-        r(1,(1-r), ... ,(1-r)^n/r)
+        r(1,(1-r), ... ,(1-r)^(n-1)/r)
+        wn, wn-1, wn-2, ...., w1
     sum of weight would always be 1
     the only thing lost would be information lost before than many step, 
     hence what's outside of lookback would contribute of only 0.001 precision within the EMA  
-
-    decay^x/weigh<0.01
-    x*lg(decay)<lg(0.01*weigh)
-    x<lg(0.01*weigh)/lg(decay)
+    
+    precision > w1
+    
+    (1-r)^n<0.01
+    x*lg(1-r)<lg(0.01)
+    x<lg(0.01)/lg(1-r)
+    
+    weigh = r (small)
+    decay = 1-r
     
     correctly accounting weigh actual making lookback larger. this would be very problematic. there needs to be a way to effectively do recursion/ema!
     """
+
     if window is None:
         window = Window.partitionBy("Ticker").orderBy("Date")
-    precision = 0.999999
+    precision = 0.001
     #period = 14
     if type == 'standard':
         decay = (period-1)/(period+1)
@@ -35,7 +42,7 @@ def ema_w(column:str,period:int=14,type='standard',window=None,debug=False,use_p
         decay = (period-1)/period
         weigh = 1/period
     
-    lookback =  math.ceil(math.log(precision*weigh)/math.log(decay)) if use_period_as_lookback is False else period
+    lookback =  math.ceil(math.log(precision)/math.log(decay)) if use_period_as_lookback is False else period
     if debug:
         print("compare lookback")
         print(period,lookback)
@@ -78,21 +85,27 @@ def ema_w_a(column:str,period:int=14,type='standard',window= None, debug=False,u
         r, (1-r)
         r, (1-r)*r, (1-r)^2
         ...
-        r(1,(1-r), ... ,(1-r)^n/r)
+        r(1,(1-r), ... ,(1-r)^(n-1)/r)
+        wn, wn-1, wn-2, ...., w1
     sum of weight would always be 1
     the only thing lost would be information lost before than many step, 
     hence what's outside of lookback would contribute of only 0.001 precision within the EMA  
-
-    decay^x/weigh<0.01
-    x*lg(decay)<lg(0.01*weigh)
-    x<lg(0.01*weigh)/lg(decay)
+    
+    precision > w1
+    
+    (1-r)^n<0.01
+    x*lg(1-r)<lg(0.01)
+    x<lg(0.01)/lg(1-r)
+    
+    weigh = r (small)
+    decay = 1-r
     
     correctly accounting weigh actual making lookback larger. this would be very problematic. there needs to be a way to effectively do recursion/ema!
     """
 
     if window is None:
         window = Window.partitionBy("Ticker").orderBy("Date")
-    precision = 0.999999
+    precision = 0.001
     #period = 14
     if type == 'standard':
         decay = (period-1)/(period+1)
@@ -101,7 +114,7 @@ def ema_w_a(column:str,period:int=14,type='standard',window= None, debug=False,u
         decay = (period-1)/period
         weigh = 1/period
     
-    lookback =  math.ceil(math.log(precision*weigh)/math.log(decay)) if use_period_as_lookback is False else period
+    lookback =  math.ceil(math.log(precision)/math.log(decay)) if use_period_as_lookback is False else period
     if debug:
         print("compare lookback")
         print(period,lookback)
@@ -135,3 +148,63 @@ def ema_w_a(column:str,period:int=14,type='standard',window= None, debug=False,u
         return {f'ema_{column}_{period}':weigh*expr, **{str(t)[-10:]:t for t in lagged_terms}}
     else:
         return weigh*expr
+    
+def ema_w_a_hof(column:str,period:int=14,type='standard',window= None, debug=False,use_period_as_lookback=False):
+    """
+        result currently equivalent to ema_w, not ema_w_a
+        use higher order function to achieve the functionality
+        rollout calc
+        weight check
+            r is smoothing rate
+            r, (1-r)
+            r, (1-r)*r, (1-r)^2
+            ...
+            r(1,(1-r), ... ,(1-r)^(n)/r)
+            wn, wn-1, wn-2, ...., w0
+        sum of weight would always be 1
+        the only thing lost would be information lost before than many step, 
+        hence what's outside of lookback would contribute of only 0.001 precision within the EMA  
+        
+        precision > w1
+        
+        (1-r)^n<0.01
+        x*lg(1-r)<lg(0.01)
+        x<lg(0.01)/lg(1-r)
+        
+        weigh = r (small)
+        decay = 1-r
+        
+        correctly accounting weigh actual making lookback larger. this would be very problematic. there needs to be a way to effectively do recursion/ema!
+    """
+    if window is None:
+        window = Window.partitionBy("Ticker").orderBy("Date")
+    precision = 0.001
+    #period = 14
+    if type == 'standard':
+        decay = (period-1)/(period+1)
+        weigh = 2/(period+1)
+    elif type == 'wiler':
+        decay = (period-1)/period
+        weigh = 1/period
+    
+    lookback =  math.ceil(math.log(precision)/math.log(decay)) if use_period_as_lookback is False else period
+
+    collected = F.transform(
+            F.array_agg(F.col(column)).over(window.rowsBetween(-lookback,0)),
+            lambda x,i: 
+                F.when( 
+                    i==0, 
+                    x*F.lit(decay)**F.lit(lookback)/F.lit(weigh) 
+                ).otherwise(x*F.lit(decay)**F.lit(lookback-i))
+    ).alias("_tmp")
+    
+    raw_val = F.aggregate(
+        collected,
+        F.lit(0.0),
+        lambda acc,x: acc+x,
+        lambda x: x*weigh
+    )
+
+    filtered_val = F.when(F.size(collected)==(lookback+1),raw_val).otherwise(F.lit(None))
+
+    return filtered_val
