@@ -8,6 +8,7 @@ import pyspark.sql.functions as F
 from pyspark.sql.types import FloatType
 import pandas as pd
 from ema import ema_w, ema_w_a, ema_w_a_hof
+from exiting import exit_timestamp_per_ticker, slipperage, commission_ratio
 
 if __name__ == "__main__":
     # Convert to a Spark DataFrame
@@ -101,21 +102,41 @@ import re
 
 w = Window.partitionBy("Ticker").orderBy("Date")
 lv2 = lv1
-#lv2 = lv2 \
-#    .withColumn("_close_yesterday", lag("Close").over(w)) \
-#    .withColumn("_trh",greatest("High","_close_yesterday")) \
-#    .withColumn("_trl",least("Low","_close_yesterday")) \
-#    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) \
-#    .withColumn("ema_ad", ema_w("_ad",period=14,type="wiler")) \
-#    .withColumn("ema_volume", ema_w("Volume",period=14,type="wiler")) \
-#    .withColumn("TMF_w", F.col("ema_ad")/F.col("ema_volume")) \
-#    .withColumn("ema_ad_wa", ema_w_a("_ad",period=14,type="wiler")) \
-#    .withColumn("ema_volume_wa", ema_w_a("Volume",period=14,type="wiler")) \
-#    .withColumn("TMF_wa", F.col("ema_ad_wa")/F.col("ema_volume_wa")) \
-#    .withColumn("TMF_4w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-4*5,0)) ) \
-#    .withColumn("TMF_8w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-8*5,0)) ) \
-#    .withColumn("TMF_26w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-26*5,0)) ) \
-#    .withColumn("TMF_26w_min_dd", F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w) ) \
+lv2 = lv2 \
+    .withColumn("_close_yesterday", F.lag("Close").over(w)) \
+    .withColumn("_trh",F.greatest("High","_close_yesterday")) \
+    .withColumn("_trl",F.least("Low","_close_yesterday")) \
+    .withColumn("_ad",(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ) \
+    .withColumn("ema_ad", ema_w_a_hof("_ad",period=14,type="wiler")) \
+    .withColumn("ema_volume", ema_w_a_hof("Volume",period=14,type="wiler")) \
+    .withColumn("TMF_w", F.col("ema_ad")/F.col("ema_volume")) \
+    .withColumn("TMF_4w_min", F.min(F.col("TMF_w")).over(w.rowsBetween(-4*5,0)) ) \
+    .withColumn("TMF_4w_min_dd", F.col("TMF_4w_min")-F.lag(F.col("TMF_4w_min"),1).over(w) ) \
+    .withColumn("TMF_26w_min", F.min(F.col("TMF_w")).over(w.rowsBetween(-26*5,0)) ) \
+    .withColumn("TMF_26w_min_dd", F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w) ) \
+    .withColumn("TMF_Simple_Signal", F.when( (F.col("TMF_26w_min_dd")==0) & (F.lag(F.col("TMF_26w_min_dd"),1).over(w)<0),1).otherwise(0) ) \
+    .withColumn("debug_1", F.lag(F.col("TMF_26w_min_dd"),1).over(w)) \
+    \
+    \
+    .withColumn("entry_price", F.lead((F.col("Open")+F.col("High")+F.col("Low")+F.col("Close"))/4,1).over(w)  ) \
+    .withColumn("exit_index_from_now", exit_timestamp_per_ticker('entry_price',"Close","Date",10,1.05,0.95,w)) \
+    .withColumn("slip_price_col", (F.col("High")+F.col("Low"))/2 ) \
+    .withColumn("exit_slipping_price", slipperage("slip_price_col","exit_index_from_now",10+2,w ) ) \
+    .withColumn("gain_loss_ratio", F.col('exit_slipping_price')/F.col("entry_price")-F.lit(commission_ratio()))
+
+    
+    #exit_timestamp_per_ticker, slipperage, commission_ratio
+
+    #.withColumn("ema_ad", ema_w("_ad",period=14,type="wiler")) \
+    #.withColumn("ema_volume", ema_w("Volume",period=14,type="wiler")) \
+    #.withColumn("TMF_w", F.col("ema_ad")/F.col("ema_volume")) \
+    #.withColumn("ema_ad_wa", ema_w_a("_ad",period=14,type="wiler")) \
+    #.withColumn("ema_volume_wa", ema_w_a("Volume",period=14,type="wiler")) \
+    #.withColumn("TMF_wa", F.col("ema_ad_wa")/F.col("ema_volume_wa")) \
+    #.withColumn("TMF_4w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-4*5,0)) ) \
+    #.withColumn("TMF_8w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-8*5,0)) ) \
+    #.withColumn("TMF_26w_min", F.min(F.col("TMF_wa")).over(w.rowsBetween(-26*5,0)) ) \
+    #.withColumn("TMF_26w_min_dd", F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w) ) \
 
 
 

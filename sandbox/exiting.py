@@ -8,7 +8,7 @@ from functools import reduce
 def exit_timestamp_per_ticker(entry_price_col, sig_col:str='Close', timestamp_col:str='Date', max_hold_period=10, max_gain=1.05, max_loss=0.95, window= None):
     "idea is to retain for max_hold_period, if this exceeds, exit on the next interval"
     future_price = F.array_agg(F.col(sig_col)).over(window.rowsBetween(0,max_hold_period+1))
-    future_timestamp = F.array_agg(F.col(timestamp_col)).over(window.rowsBetween(0,max_hold_period+1))
+    #future_timestamp = F.array_agg(F.col(timestamp_col)).over(window.rowsBetween(0,max_hold_period+1))
     
     first_signal = F.array_position(
         F.transform(
@@ -53,3 +53,8 @@ def __seq_find_time_allowed_trades():
     get all intervals for which a position is possibly taken
     """
     pass
+
+def __window_find_best_trade():
+    """
+    within a given time frame, find the best stock (some metric like market value, trajectory of price, and)
+    """
