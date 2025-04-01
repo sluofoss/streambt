@@ -1,0 +1,28 @@
+#!/bin/bash
+#https://stackoverflow.com/questions/51723137/git-hooks-file-naming
+
+
+
+# This pre-commit hook removes executed output from .ipynb files being staged for commit
+
+# Get the list of staged .ipynb files
+STAGED_FILES=$(git diff --cached --name-only -- '*.ipynb')
+
+# Loop through each .ipynb file and clean the outputs
+for file in $STAGED_FILES; do
+  if [[ -f $file ]]; then
+    # Use jq to remove output fields from .ipynb files
+    jq --indent 1 \
+    '
+    (.cells[] | select(has("outputs")) | .outputs) = []
+    | (.cells[] | select(has("execution_count")) | .execution_count) = null
+    | .metadata = {"language_info": {"name":"python", "pygments_lexer": "ipython3"}}
+    | .cells[].metadata = {}
+    ' "$file" > tmp_file && mv tmp_file "$file"
+
+    # Add the modified file back to the staging area
+    git add "$file"
+  fi
+done
+
+exit 0

@@ -119,9 +119,9 @@ lv2 = lv2 \
     \
     \
     .withColumn("entry_price", F.lead((F.col("Open")+F.col("High")+F.col("Low")+F.col("Close"))/4,1).over(w)  ) \
-    .withColumn("exit_index_from_now", exit_timestamp_per_ticker('entry_price',"Close","Date",10,1.05,0.95,w)) \
+    .withColumn("exit_index_from_now", exit_timestamp_per_ticker('entry_price',"Close","Date",20,1.1,0.90,w)) \
     .withColumn("slip_price_col", (F.col("High")+F.col("Low"))/2 ) \
-    .withColumn("exit_slipping_price", slipperage("slip_price_col","exit_index_from_now",10+2,w ) ) \
+    .withColumn("exit_slipping_price", slipperage("slip_price_col","exit_index_from_now",20+2,w ) ) \
     .withColumn("gain_loss_ratio", F.col('exit_slipping_price')/F.col("entry_price")-F.lit(commission_ratio()))
 
     
@@ -190,10 +190,19 @@ lv2 = lv2 \
 
 # export full thing
 #lv2.write.csv('full_df_debug.csv',header=True, mode="overwrite")
+#lv2.write.parquet("full_df_debug.parquet", mode="overwrite")
 
 
 #lv2.where(lv2.Ticker == 'CBA.AX').show(300)
-lv2.where(lv2.Ticker == 'CBA.AX').write.csv('cba_debug_2.csv',header=True, mode="overwrite")
+#lv2.where(lv2.Ticker == 'CBA.AX').write.csv('cba_debug_2.csv',header=True, mode="overwrite")
+
+lv2.where(F.col("TMF_Simple_Signal")==1).groupby(["Ticker",F.year("Date")]).agg(
+    F.avg("gain_loss_ratio").alias("average trade return"),
+    F.count("gain_loss_ratio").alias("total trade count"),
+    F.count(F.when(F.col("gain_loss_ratio")>1,1)).alias("trade won"),
+    F.count(F.when(F.col("gain_loss_ratio")<1,1)).alias("trade loss"),
+).write.parquet("full_trade_opportunities.parquet", mode="overwrite")
+
 #lv1.withColumn("_close_yesterday")
 t = update_time(t)
 

@@ -5,4 +5,6 @@ histdata/
 .qodo
 full_df_debug.csv/
 cba_debug.csv/
+*.csv/
+*.parquet/
 __pycache__
