@@ -1,6 +1,7 @@
 #!/bin/bash
-#https://stackoverflow.com/questions/51723137/git-hooks-file-naming
 
+#https://stackoverflow.com/questions/51723137/git-hooks-file-naming
+#https://stackoverflow.com/questions/73218304/how-to-clear-jupyter-notebooks-output-and-metadata-when-using-git-commit
 
 
 # This pre-commit hook removes executed output from .ipynb files being staged for commit

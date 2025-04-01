@@ -114,16 +114,15 @@ lv2 = lv2 \
     .withColumn("TMF_4w_min_dd", F.col("TMF_4w_min")-F.lag(F.col("TMF_4w_min"),1).over(w) ) \
     .withColumn("TMF_26w_min", F.min(F.col("TMF_w")).over(w.rowsBetween(-26*5,0)) ) \
     .withColumn("TMF_26w_min_dd", F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w) ) \
+    .withColumn('TMF') \
     .withColumn("TMF_Simple_Signal", F.when( (F.col("TMF_26w_min_dd")==0) & (F.lag(F.col("TMF_26w_min_dd"),1).over(w)<0),1).otherwise(0) ) \
     .withColumn("debug_1", F.lag(F.col("TMF_26w_min_dd"),1).over(w)) \
-    \
     \
     .withColumn("entry_price", F.lead((F.col("Open")+F.col("High")+F.col("Low")+F.col("Close"))/4,1).over(w)  ) \
     .withColumn("exit_index_from_now", exit_timestamp_per_ticker('entry_price',"Close","Date",20,1.1,0.90,w)) \
     .withColumn("slip_price_col", (F.col("High")+F.col("Low"))/2 ) \
     .withColumn("exit_slipping_price", slipperage("slip_price_col","exit_index_from_now",20+2,w ) ) \
     .withColumn("gain_loss_ratio", F.col('exit_slipping_price')/F.col("entry_price")-F.lit(commission_ratio()))
-
     
     #exit_timestamp_per_ticker, slipperage, commission_ratio
 

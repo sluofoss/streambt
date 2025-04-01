@@ -80,6 +80,15 @@ strat1_uuid = cerebro.add_strat(pulse, allocation_method)
 
 strat allocation > broker interaction (commissions etc) (should be a function rather than col) > portfolio > strat allocation (needs to be done in a for loop, cant be easily vectorized?)
 
+dataframe would look like below:
+```
+ts,t,ohlcv,id1...n,buy_sig,buy_price,sell_ts,slip_sell_price,additional_cost,gain_loss_ratio
+
+buy_price = o[i+1]
+gain_loss_ratio = buy_sig * [slip_sell_price/buy_price-commission_ratio]
+
+```
+
 # stuff avail in backtrader for reference
 - Cerebro (Y)
 - Data Feeds (Y)
