@@ -115,7 +115,7 @@ gain_loss_ratio = buy_sig * [slip_sell_price/buy_price-commission_ratio]
 - strategy agnostic metrics like past performance metrics like yearly return on hold to stock
 - [x] improve tmf signal with using percentile on strength of dd 
 - currently tallying win loss ratio of single instrument, change to focus on ranking product of all trades?
-- 
+- plot the performance of the strat for not just over all the years, but for each year to check for consistency.
 
 ## experimental result
 - naively introducing median filter or dd count filter made the signal worst
