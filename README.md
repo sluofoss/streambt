@@ -104,3 +104,19 @@ gain_loss_ratio = buy_sig * [slip_sell_price/buy_price-commission_ratio]
 - Plotting
 - Datetime
 - Automated Running
+
+## next step:
+- convert yearly portfolio performance analysis to pyspark
+- parametrize things like 
+  - years of strategy consistency
+  - max profit margin per trade
+  - max loss per trade
+- increase grain on performance analysis into trade opportunity level. (try to catch extreme gain events?)
+- strategy agnostic metrics like past performance metrics like yearly return on hold to stock
+- [x] improve tmf signal with using percentile on strength of dd 
+- currently tallying win loss ratio of single instrument, change to focus on ranking product of all trades?
+- 
+
+## experimental result
+- naively introducing median filter or dd count filter made the signal worst
+- tmf26w are more reliable wrt w l ratio than tmf4w
