@@ -103,30 +103,47 @@ import re
 w = Window.partitionBy("Ticker").orderBy("Date")
 lv2 = lv1
 lv2 = (
+    # indicator section
     lv2 
+    .withColumns({
+        "ema_close_12_hof": ema_w_a_hof("Close",period=12) ,
+        "ema_close_26_hof": ema_w_a_hof("Close",period=26) ,
+        "macd_hof": F.col("ema_close_12_hof")-F.col("ema_close_26_hof") ,
+    })
+    .withColumn("macd_signal_hof", ema_w_a_hof("macd_hof",period=9))
+    
+    
     .withColumns({
         "_close_yesterday": F.lag("Close").over(w),
         "_trh":F.greatest("High","_close_yesterday"),
         "_trl":F.least("Low","_close_yesterday"),
-        "_ad":(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") 
-    }) 
+        "_ad":(2*F.col("Close")-F.col("_trh")-F.col("_trl"))/(F.col("_trh")-F.col("_trl")+0.00000000001)*F.col("Volume") ,
+    })
     .withColumns({
         "ema_ad": ema_w_a_hof("_ad",period=14,type="wiler"),
         "ema_volume": ema_w_a_hof("Volume",period=14,type="wiler"),
+    })
+    .withColumns({
         "TMF_w": F.col("ema_ad")/F.col("ema_volume"),
-    }) 
-    .withColumn("TMF_4w_min", F.min(F.col("TMF_w")).over(w.rowsBetween(-4*5,0)) ) 
-    .withColumn("TMF_4w_min_dd", F.col("TMF_4w_min")-F.lag(F.col("TMF_4w_min"),1).over(w) ) 
-    .withColumn("TMF_26w_min", F.min(F.col("TMF_w")).over(w.rowsBetween(-26*5,0)) ) 
-    .withColumn("TMF_26w_min_dd", F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w) ) 
+    })
+    .withColumns({
+        "TMF_4w_min": F.min(F.col("TMF_w")).over(w.rowsBetween(-4*5,0)) ,
+        "TMF_26w_min": F.min(F.col("TMF_w")).over(w.rowsBetween(-26*5,0)),
+    })
+    .withColumns({
+        "TMF_4w_min_dd": F.col("TMF_4w_min")-F.lag(F.col("TMF_4w_min"),1).over(w) ,
+        "TMF_26w_min_dd": F.col("TMF_26w_min")-F.lag(F.col("TMF_26w_min"),1).over(w),
+    })
+    .withColumns({
+        'TMF_4w_min_dd_qtl_50': F.percentile(F.when(F.col("TMF_4w_min_dd")<0,F.col("TMF_4w_min_dd")), 0.50 ).over(w.rowsBetween(-52*5*2,0)) ,
+        'TMF_4w_min_dd_qtl_50_alt': F.percentile_approx(F.when(F.col("TMF_4w_min_dd")<0,F.col("TMF_4w_min_dd")), 0.50 ).over(w.rowsBetween(-52*5*2,0)) ,
+        'TMF_26w_min_dd_qtl_50': F.percentile(F.when(F.col("TMF_26w_min_dd")<0,F.col("TMF_26w_min_dd")), 0.50 ).over(w.rowsBetween(-52*5*2,0)) ,
+        'TMF_26w_min_dd_qtl_50_alt': F.percentile_approx(F.when(F.col("TMF_26w_min_dd")<0,F.col("TMF_26w_min_dd")), 0.50 ).over(w.rowsBetween(-52*5*2,0)) ,
+    })
     #.withColumn("TMF_26w_min_dd_bool_count", F.sum(F.col("TMF_26w_min_dd")/F.abs(F.col("TMF_26w_min_dd")) ).over(w.rowsBetween(-4*5,0))  ) 
     # performance not great
-    .withColumn('TMF_4w_min_dd_qtl_50',F.percentile(F.when(F.col("TMF_4w_min_dd")<0,F.col("TMF_4w_min_dd")), 0.50 ).over(w.rowsBetween(-52*5*2,0)) )
-    .withColumn('TMF_4w_min_dd_qtl_50_alt',F.percentile_approx(F.when(F.col("TMF_4w_min_dd")<0,F.col("TMF_4w_min_dd")), 0.50 ).over(w.rowsBetween(-52*5*2,0)) )
     
-    .withColumn('TMF_26w_min_dd_qtl_50',F.percentile(F.when(F.col("TMF_26w_min_dd")<0,F.col("TMF_26w_min_dd")), 0.50 ).over(w.rowsBetween(-52*5*2,0)) )
-    .withColumn('TMF_26w_min_dd_qtl_50_alt',F.percentile_approx(F.when(F.col("TMF_26w_min_dd")<0,F.col("TMF_26w_min_dd")), 0.50 ).over(w.rowsBetween(-52*5*2,0)) )
-    
+    #
     .withColumn("TMF_Simple_Signal", F.when( 
         (F.col("TMF_26w_min_dd")==0) 
         & (F.lag(F.col("TMF_26w_min_dd"),1).over(w) < 0)
@@ -134,19 +151,32 @@ lv2 = (
         #& (F.lag(F.col("TMF_4w_min_dd_qtl_50"),1).over(w) > F.lag(F.col("TMF_4w_min_dd"),1).over(w) )
         ,1
     ).otherwise(0) ) 
-
-    .withColumn("entry_price", F.lead((F.col("Open")+F.col("High")+F.col("Low")+F.col("Close"))/4,1).over(w)  )
-    .withColumn("exit_index_from_now", exit_timestamp_per_ticker('entry_price',"Close","Date",20,1.1,0.90,w))
-    #maybe consider a strat that optimizes this instead of machine learning?
-    .withColumn("slip_price_col", (F.col("High")+F.col("Low"))/2 )
-    .withColumn("exit_slipping_price", slipperage("slip_price_col","exit_index_from_now",20+2,w ) )
-    .withColumn("gain_loss_ratio", F.col('exit_slipping_price')/F.col("entry_price")-F.lit(commission_ratio()))
-
-    .withColumn("exit_index_from_now2", exit_timestamp_per_ticker('entry_price',"Close","Date",10,1.05,0.95,w))
-    #maybe consider a strat that optimizes this instead of machine learning?
-    .withColumn("slip_price_col2", (F.col("High")+F.col("Low"))/2 )
-    .withColumn("exit_slipping_price2", slipperage("slip_price_col","exit_index_from_now",10+2,w ) )
-    .withColumn("gain_loss_ratio2", F.col('exit_slipping_price')/F.col("entry_price")-F.lit(commission_ratio()))
+    #maybe consider a strat that optimizes the param here instead of machine learning?
+    .withColumns({
+        "entry_price": F.lead((F.col("Open")+F.col("High")+F.col("Low")+F.col("Close"))/4,1).over(w)  ,
+        
+        "exit_index_from_now": exit_timestamp_per_ticker('entry_price',"Close","Date",20,1.1,0.90,w) ,
+        "exit_index_from_now2": exit_timestamp_per_ticker('entry_price',"Close","Date",10,1.05,0.95,w) ,
+    })
+    .withColumns({
+        "slip_price_col": (F.col("High")+F.col("Low"))/2 ,
+        "slip_price_col2": (F.col("High")+F.col("Low"))/2 ,
+    })
+    .withColumns({
+        "exit_slipping_price": slipperage("slip_price_col","exit_index_from_now",20+2,w ) ,
+        "exit_slipping_price2": slipperage("slip_price_col","exit_index_from_now",10+2,w ) ,
+          
+        "gain_loss_ratio": F.col('exit_slipping_price')/F.col("entry_price")-F.lit(commission_ratio()),
+        "gain_loss_ratio2": F.col('exit_slipping_price')/F.col("entry_price")-F.lit(commission_ratio()),
+    })
+    .withColumns({
+        "previous_exit_success":    F.count(F.when((F.col('gain_loss_ratio') > 1.02) & (F.col("TMF_Simple_Signal")==1),1)).over(w.rowsBetween(start=-52*5-20-10,end=-20-10)),
+        "previous_exit_fail":       F.count(F.when((F.col('gain_loss_ratio') <= 1.02) & (F.col("TMF_Simple_Signal")==1),1)).over(w.rowsBetween(start=-52*5-20-10,end=-20-10)),
+        "previous_exit_result_ratio":F.col("previous_exit_success")/(F.col("previous_exit_fail")+1),
+        "previous_exit_success2":   F.count(F.when((F.col('gain_loss_ratio2') > 1.01) & (F.col("TMF_Simple_Signal")==1),1)).over(w.rowsBetween(start=-52*5-10-10,end=-10-10)),
+        "previous_exit_fail2":      F.count(F.when((F.col('gain_loss_ratio2') <= 1.01) & (F.col("TMF_Simple_Signal")==1),1)).over(w.rowsBetween(start=-52*5-10-10,end=-10-10)),
+        "previous_exit_result_ratio2":F.col("previous_exit_success2")/(F.col("previous_exit_fail2")+1),
+    })
 )
     #exit_timestamp_per_ticker, slipperage, commission_ratio
 
@@ -185,17 +215,13 @@ lv2 = (
 #    .withColumn("macd_wa", F.col("ema_close_12_wa")-F.col("ema_close_26_wa")) \
 #    .withColumn("macd_signal_wa", ema_w_a("macd_wa",period=9))
 
-lv2 = (lv2 \
-    .withColumn("ema_close_12_hof", ema_w_a_hof("Close",period=12)) 
-    .withColumn("ema_close_26_hof", ema_w_a_hof("Close",period=26)) 
-    .withColumn("macd_hof", F.col("ema_close_12_hof")-F.col("ema_close_26_hof")) 
-    .withColumn("macd_signal_hof", ema_w_a_hof("macd_hof",period=9)) 
-    
+
     #.withColumn("ema_close_12w_hof", ema_w_a_hof("Close",period=12*5)) 
     #.withColumn("ema_close_26w_hof", ema_w_a_hof("Close",period=26*5)) 
     #.withColumn("macd_w_hof", F.col("ema_close_12w_hof")-F.col("ema_close_26w_hof")) 
     #.withColumn("macd_w_signal_hof", ema_w_a_hof("macd_w_hof",period=9))
-)
+
+
 #lv2 = lv2.withColumn('true_ema',.mean())
 
 # --------------------
