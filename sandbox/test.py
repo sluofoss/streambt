@@ -15,7 +15,7 @@ if __name__ == "__main__":
     from pyspark.sql import SparkSession
     
     spark = SparkSession.builder \
-    .master("local[6]") \
+    .master("local[8]") \
     .appName("udf") \
     .config("spark.driver.extraJavaOptions", "-Dio.netty.tryReflectionSetAccessible=true") \
     .config("spark.executor.extraJavaOptions", "-Dio.netty.tryReflectionSetAccessible=true") \
@@ -109,9 +109,25 @@ lv2 = (
         "ema_close_12_hof": ema_w_a_hof("Close",period=12) ,
         "ema_close_26_hof": ema_w_a_hof("Close",period=26) ,
         "macd_hof": F.col("ema_close_12_hof")-F.col("ema_close_26_hof") ,
+        "capital_traded_approx": F.col("Volume") * F.greatest(F.col('Open') + F.col('High')+F.col('Low')+F.col('Close')/4, F.lit(0))
     })
     .withColumn("macd_signal_hof", ema_w_a_hof("macd_hof",period=9))
     
+    .withColumns({
+        '_chg': F.col('Close')/F.col('Open')-1 ,
+        '_avg_gain': F.when(F.col('_chg')>0,F.col('_chg')).otherwise(0),
+        '_avg_loss': F.when(F.col('_chg')<=0,F.col('_chg')).otherwise(0),
+    })
+    .withColumns({
+        'RSI': (100 - 100/(1+
+                          F.avg(F.col('_avg_gain')).over(w.rowsBetween(-14,0))/
+                          F.avg(F.col('_avg_loss')).over(w.rowsBetween(-14,0))
+                        )),
+        'RSI_ema': (100 - 100/(1+
+                          ema_w_a_hof("_avg_gain",period=14,type="wiler")/
+                          ema_w_a_hof("_avg_loss",period=14,type="wiler")
+                        )),
+    })
     
     .withColumns({
         "_close_yesterday": F.lag("Close").over(w),
@@ -246,7 +262,7 @@ lv2 = (
 #lv2.write.csv('full_df_debug.csv',header=True, mode="overwrite")
 
 #lv2.write.parquet("full_df_debug.parquet", mode="overwrite")
-lv2.write.parquet("full_df_2_exit.parquet", mode="overwrite")
+lv2.write.parquet("full_df_2_exit_more_core.parquet", mode="overwrite")
 
 
 #lv2.where(lv2.Ticker == 'CBA.AX').show(300)
