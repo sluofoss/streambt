@@ -118,7 +118,10 @@ gain_loss_ratio = buy_sig * [slip_sell_price/buy_price-commission_ratio]
 - plot the performance of the strat for not just over all the years, but for each year to check for consistency.
 - support overnight funding cost for leverage i.e. ((1+0.05/365)**30)
 - check for consistency of range for tmf across tickers to see if volume weighted normalizes the range. thus making it suitable for tree models
-
+    - kinda solved this by adding log(volume * avg(ohlc)) = log(cap) and log(vol) as additional features.
+- [x] rsi 
+- standardize experiments with param search, pipeline, model search, mlflow
+- perhaps convert to polars for better iteration speed? current focus is daily data and on single machine and lambda deployment would benefit from polars more than pyspark. polars also have native ewm implementation. 
 ## experimental result
 - naively introducing median filter or dd count filter made the signal worst
 - tmf26w are more reliable wrt w l ratio than tmf4w
