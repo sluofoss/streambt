@@ -28,4 +28,5 @@ dev = [
     "pyarrow>=19.0.1",
     "scikit-learn>=1.6.1",
     "scipy>=1.15.2",
+    "shap>=0.47.1",
 ]
