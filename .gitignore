@@ -8,3 +8,6 @@ cba_debug.csv/
 *.csv/
 *.parquet/
 __pycache__
+
+mlartifacts/
+mlruns/
