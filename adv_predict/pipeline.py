@@ -39,20 +39,20 @@ def objective(trial:optuna.Trial):
     regressor_type  = trial.suggest_categorical('regressor_type',(
         'DecisionTreeRegressor',
         'RandomForestRegressor',
-        'HistGradientBoostingRegressor',
+        'HistGradientBoostingRegressor'
     ))
-    base_params = {'model_type':regressor_type}
+    base_params = {'regressor_type':regressor_type}
     if regressor_type == 'RandomForestRegressor':
         sub_params = {
-            'n_estimators'    : trial.suggest_int("n_estimators", 1, 10, 1),
-            'max_depth'       : trial.suggest_int("max_depth", 2, 10, 1),
+            'n_estimators'    : trial.suggest_int("n_estimators", 1, 10, step = 1),
+            'max_depth'       : trial.suggest_int("max_depth", 2, 10, step = 1),
             'criterion'       : trial.suggest_categorical("criterion", ['squared_error', 'friedman_mse', 'absolute_error', 'poisson']),
         }
         clf = RandomForestRegressor(**sub_params)
     elif regressor_type == 'HistGradientBoostingRegressor':
         sub_params = {
-            'max_iter'    : trial.suggest_int("max_iter", 1, 10, 1),
-            'max_depth'   : trial.suggest_int("max_depth", 2, 10, 1),
+            'max_iter'    : trial.suggest_int("max_iter", 1, 10, step = 1),
+            'max_depth'   : trial.suggest_int("max_depth", 2, 10, step = 1),
             'loss'        : trial.suggest_categorical("loss", ['squared_error', 'absolute_error', 'gamma', 'poisson']), #'quantile' need further subgrid definition
         }
         clf = HistGradientBoostingRegressor(**sub_params)

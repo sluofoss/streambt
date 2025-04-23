@@ -121,8 +121,15 @@ gain_loss_ratio = buy_sig * [slip_sell_price/buy_price-commission_ratio]
     - kinda solved this by adding log(volume * avg(ohlc)) = log(cap) and log(vol) as additional features.
 - [x] rsi 
 - standardize experiments with param search, pipeline, model search, mlflow
-- perhaps convert to polars for better iteration speed? current focus is daily data and on single machine and lambda deployment would benefit from polars more than pyspark. polars also have native ewm implementation. 
+- [x] perhaps convert to polars for better iteration speed? current focus is daily data and on single machine and lambda deployment would benefit from polars more than pyspark. polars also have native ewm implementation. 
 - refactor polars code for better readability.
+- parametrize polar script to be part of the testing.
+- review the best artifact detail results on data.
+- add more dedicated metrics like 
+  - consistent returns over the years
+  - maximum drawdown
+  - sharpe ratio
+  - annualized return
 ## experimental result
 - naively introducing median filter or dd count filter made the signal worst
 - tmf26w are more reliable wrt w l ratio than tmf4w
