@@ -105,7 +105,7 @@ gain_loss_ratio = buy_sig * [slip_sell_price/buy_price-commission_ratio]
 - Datetime
 - Automated Running
 
-## next step:
+## TODO:
 - convert yearly portfolio performance analysis to pyspark
 - parametrize things like 
   - years of strategy consistency
@@ -119,12 +119,17 @@ gain_loss_ratio = buy_sig * [slip_sell_price/buy_price-commission_ratio]
 - support overnight funding cost for leverage i.e. ((1+0.05/365)**30)
 - check for consistency of range for tmf across tickers to see if volume weighted normalizes the range. thus making it suitable for tree models
     - kinda solved this by adding log(volume * avg(ohlc)) = log(cap) and log(vol) as additional features.
-- [x] rsi 
+- more indicators
+  - [x] rsi
+  - [ ] some form of bounded macd or difference between percentile and current macd value
+  - [ ] add actual difference between percentile and tmf value (because naive tree are not oblique)
+  - [ ] adx +-di
 - standardize experiments with param search, pipeline, model search, mlflow
 - [x] perhaps convert to polars for better iteration speed? current focus is daily data and on single machine and lambda deployment would benefit from polars more than pyspark. polars also have native ewm implementation. 
 - refactor polars code for better readability.
 - parametrize polar script to be part of the testing.
 - review the best artifact detail results on data.
+- add index + etf data upstream to either use as ticker or feature
 - add more dedicated metrics like 
   - consistent returns over the years
   - maximum drawdown

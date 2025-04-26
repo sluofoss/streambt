@@ -20,6 +20,12 @@ from sklearn.metrics import (
     mean_tweedie_deviance,
 )
 
+from metrics import precision_at, named_partial
+
+from inspect import signature, Parameter
+
+
+
 # track parameter and result
 import mlflow
 from mlflow.models import infer_signature
@@ -33,6 +39,22 @@ full_df = pl.read_parquet(parquet_file).rename({'Date':'Date_index', 'Date_str':
 #https://stackoverflow.com/questions/73539873/saving-trained-models-in-optuna-to-a-variable
 from collections import defaultdict
 models = defaultdict(dict)
+
+
+
+# define evaluation metrics (could be tightly coupled with dataset)
+# order by the ones to use during optimization (TODO pareto front)
+eval_metrics = [
+    named_partial(precision_at, threshold = 1.01),
+    named_partial(precision_at, threshold = 1.05),
+    named_partial(precision_at, threshold = 1.10),
+    #named_partial(precision_at ),
+    mean_absolute_error,
+    mean_squared_error,
+    mean_poisson_deviance,
+    mean_gamma_deviance,
+    named_partial(mean_tweedie_deviance, power=3),
+]
 
 def objective(trial:optuna.Trial):
     # suggest hyperparam and model definition
@@ -63,6 +85,8 @@ def objective(trial:optuna.Trial):
             'criterion'       : trial.suggest_categorical("criterion", ['squared_error', 'friedman_mse', 'absolute_error', 'poisson']),
         }
         clf = DecisionTreeRegressor(**sub_params)
+    else:
+        raise Exception('unknown regressor type')
     params = {**base_params, **sub_params}
     print('--logging params--')
     print(params)
@@ -70,19 +94,19 @@ def objective(trial:optuna.Trial):
     feature_target = db.sql(
     f"""
     select 
-        TMF_w
-        , TMF_4w_min
-        , TMF_4w_min_dd
-        , TMF_26w_min
-        , TMF_26w_min_dd
-        , TMF_4w_min_dd_qtl_50
-        , TMF_4w_min_dd_qtl_50_alt
-        , TMF_26w_min_dd_qtl_50
-        , TMF_26w_min_dd_qtl_50_alt 
+        TMF_w                           ::DOUBLE
+        , TMF_4w_min                    ::DOUBLE
+        , TMF_4w_min_dd                 ::DOUBLE
+        , TMF_26w_min                   ::DOUBLE
+        , TMF_26w_min_dd                ::DOUBLE
+        , TMF_4w_min_dd_qtl_50          ::DOUBLE
+        , TMF_4w_min_dd_qtl_50_alt      ::DOUBLE
+        , TMF_26w_min_dd_qtl_50         ::DOUBLE
+        , TMF_26w_min_dd_qtl_50_alt     ::DOUBLE
         
-        , previous_exit_success
+        , previous_exit_success         ::DOUBLE
         --, previous_exit_success2
-        , previous_exit_result_ratio
+        , previous_exit_result_ratio    ::DOUBLE
         --, previous_exit_result_ratio2
         --, TMF_Simple_Signal
         --, macd_hof
@@ -92,15 +116,15 @@ def objective(trial:optuna.Trial):
         --, Volume
         --, RSI
         --, RSI_ema
-        , stddev_samp(log(Volume+1)) over (partition by Ticker order by Date rows between 5*52 preceding and current row) as std_vol
-        , log(Volume + 1)  as log_vol
-        , stddev_samp(log(cap_xchgd_approx+100)) over (partition by Ticker order by Date rows between 5*52 preceding and current row) as std_cap
-        , log(cap_xchgd_approx + 100) as log_cap
-        , dayofweek(Date) as day_of_week
+        , stddev_samp(log(Volume+1))                    over (partition by Ticker order by Date rows between 5*52 preceding and current row) as std_vol
+        , log(Volume + 1)                               as log_vol
+        , stddev_samp(log(cap_xchgd_approx+100))        over (partition by Ticker order by Date rows between 5*52 preceding and current row) as std_cap
+        , log(cap_xchgd_approx + 100)                   as log_cap
+        , cast(dayofweek(Date) as DOUBLE)               as day_of_week
         , Date
         , Ticker
-        , exit_gain_loss
-        , exit_gain_loss as target
+        , exit_gain_loss::DOUBLE                            as exit_gain_loss             
+        , exit_gain_loss::DOUBLE                            as target
     from full_df
     where TMF_Simple_Signal = 1
     --and Ticker in string 
@@ -127,18 +151,41 @@ def objective(trial:optuna.Trial):
         Y_validate_predict = clf.predict(X_validate)
 
         # Log results
-        res = {
-
+        available_args = {
+            'y_true': Y_validate,
+            'y_pred': Y_validate_predict,
+            'dates': validate['Date'],  # Ensure this is the correct key for dates
         }
-        for func in [
-            mean_absolute_error,
-            mean_squared_error,
-            mean_poisson_deviance,
-            mean_gamma_deviance,
-            #mean_tweedie_deviance,
-        ]:
-            res[f"eval_{func.__name__}"] = func(Y_validate, Y_validate_predict)
-            mlflow.log_metric(f"eval_{func.__name__}", func(Y_validate, Y_validate_predict))
+        res = {}
+
+        for func in eval_metrics:
+            sig = signature(func)
+            params = sig.parameters
+            
+            # Collect required and optional parameters
+            kwargs = {}
+            for param_name, param in params.items():
+                if param_name in available_args:
+                    kwargs[param_name] = available_args[param_name]
+                elif param.default == Parameter.empty:
+                    # Handle missing required parameters (if any)
+                    raise ValueError(f"Missing required parameter '{param_name}' for {func.__name__}")
+            # Call the function with the collected arguments
+            try:
+                metric_value = func(**kwargs)
+            except Exception as e:
+                print(f"Error evaluating {func.__name__}: {e}")
+                raise e
+                #continue
+            
+            # Store and log the result
+            res[f"{func.__name__}"] = metric_value
+            mlflow.log_metric(f"{func.__name__}", metric_value)
+
+
+        for func in eval_metrics:
+            res[f"{func.__name__}"] = func(Y_validate, Y_validate_predict)
+            mlflow.log_metric(f"{func.__name__}", func(Y_validate, Y_validate_predict))
         
         signature = infer_signature(X_train, Y_train) 
 
@@ -146,16 +193,18 @@ def objective(trial:optuna.Trial):
         # Log model
         mlflow.sklearn.log_model(clf, "model", signature=signature)
 
-    return res['eval_mean_poisson_deviance']#{"loss": eval_rmse, "status": STATUS_OK, "model": model}
+    return res[eval_metrics[0].__name__]
+    #return res['mean_poisson_deviance']#{"loss": eval_rmse, "status": STATUS_OK, "model": model}
 
 # 3. Create a study object and optimize the objective function.
 mlflow.set_experiment("/stock_signal_predict")
 with mlflow.start_run():
-    study = optuna.create_study(direction='minimize', sampler=TPESampler())
-    study.optimize(objective, n_trials=200)
+    study = optuna.create_study(direction='maximize', sampler=TPESampler())
+    study.optimize(objective, n_trials=100)
     
     mlflow.log_params(study.best_params)
-    mlflow.log_metric("eval_mean_poisson_deviance", study.best_value)
+    #mlflow.log_metric("mean_poisson_deviance", study.best_value)
+    mlflow.log_metric(eval_metrics[0].__name__, study.best_value)
 
 
     mlflow.sklearn.log_model(models[study.study_name][study.best_trial.number], "model")
