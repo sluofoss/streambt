@@ -1,6 +1,6 @@
 import polars as pl
 import polars.datatypes as DTypes
-
+print('start script')
 def exit_signal_statistics_ts_by_ticker(
         df:pl.DataFrame, 
         entry_price_col:pl.Expr=(pl.col('Open')+pl.col('High')+pl.col('Low')+pl.col('Close'))/4,
@@ -80,7 +80,58 @@ def exit_signal_statistics_ts_by_ticker(
     #)
 
     return tmp
+def adx(df:pl.DataFrame):
+    #https://github.com/twopirllc/pandas-ta/blob/main/pandas_ta/trend/adx.py
+    over_params = {'partition_by':'Ticker', 'order_by':"Date"}
+    base = (
+        df.with_columns(
+            # https://www.investopedia.com/articles/trading/07/adx-trend-indicator.asp
+            # Plus directional movement (+DM) = Current High - Previous High
+            # Minus directional movement (-DM) = Previous Low - Current Low 
+            up = pl.col('High') - pl.col('High').shift(1).over(partition_by=pl.col('Ticker'),order_by=pl.col("Date")),
+            dn = pl.col('Low').shift(1).over(partition_by=pl.col('Ticker'),order_by=pl.col("Date")) - pl.col('Low'),
+        )
+        .with_columns(
+            PDM = pl.when( (pl.col('up')>pl.col('dn')) & (pl.col('up')>0) ).then(pl.col('up')).otherwise(0), 
+            NDM = pl.when( (pl.col('dn')>pl.col('up')) & (pl.col('dn')>0) ).then(pl.col('dn')).otherwise(0),
+        )
+        .with_columns(
+            TR = pl.max_horizontal(
+                (pl.col('High') - pl.col('Low')),
+                (pl.col('High') - pl.col('Close').shift(1).over(partition_by=pl.col('Ticker'),order_by=pl.col("Date"))).abs(),
+                (pl.col('Low') - pl.col('Close').shift(1).over(partition_by=pl.col('Ticker'),order_by=pl.col("Date"))).abs(),
+            )
+        )
+    )
+    tmp = (
+        base.join(
+            base.rolling(index_column='Date',period=f'{14}i',group_by='Ticker').agg(
+                pl.col('TR').mean().alias('ATR'),
+            ),
+            on=[pl.col('Date'),pl.col('Ticker')]
+        )
+        .with_columns(
+            PDI = pl.col('PDM').ewm_mean(com=14-1).over(**over_params)/pl.col('ATR'),
+            NDI = pl.col('NDM').ewm_mean(com=14-1).over(**over_params)/pl.col('ATR')
+        )
+        .with_columns(
+            DX = (pl.col('PDI')-pl.col('NDI')).abs()/(pl.col('PDI')+pl.col('NDI')).abs()
+        )
+        .with_columns(
+            ADX = pl.col('DX').fill_nan(0).ewm_mean(com=14-1).over(**over_params)
+        )
+        #.drop([
+        #    'PDM',
+        #    'NDM',
+        #    'TR',
+        #    'ATR',
+        #    'DX',
+        #])
+    )
 
+    return tmp
+
+print('start read')
 
 lazy = False
 if lazy:
@@ -111,6 +162,7 @@ else:
     }, allow_missing_columns=True)
 lv1 = df.sort('Date',"Ticker")
 
+print('start indicators')
 
 over_params = {'partition_by':'Ticker', 'order_by':"Date"}
 
@@ -189,6 +241,8 @@ lv2 = (
         on = [pl.col("Date"),pl.col("Ticker")]
     )
 ) 
+print('start rsi')
+
     #---------------------------------rsi
 lv2 = (
     lv2.with_columns(
@@ -233,6 +287,8 @@ lv2 = (
     )
 )
 # -------------------------------- tmf signal
+print('start tmf sig')
+
 lv2 = (
     lv2.with_columns(
         TMF_Simple_Signal = pl.when(
@@ -240,7 +296,14 @@ lv2 = (
         ).then(1).otherwise(0)
     )
 )
+
+# -------------------------------- ADX
+print('start adx')
+lv2 = adx(lv2)
+lv2.write_parquet('full_df_debug.pl.parquet')
 # -------------------------------- entry_exit_calc
+"""
+print('start entry exit calc')
 lv2 = (
     lv2.with_columns(
         entry_price= ((pl.col("Open")+pl.col("High")+pl.col("Low")+pl.col("Close"))/4)#.shift(-1).over(**over_params),
@@ -256,6 +319,7 @@ lv2 = (
 
 lv3 = exit_signal_statistics_ts_by_ticker(lv2,max_hold_period=10)
 
+print('start previous success')
 
 lv4 = (
     lv3.join(
@@ -274,5 +338,6 @@ lv4 = (
 
 if lazy:
     lv4 = lv4.select(pl.col("*")).collect()
-
 lv4.write_parquet('full_df_debug.pl.parquet')
+
+"""
