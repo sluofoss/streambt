@@ -3,6 +3,8 @@ from numpy.typing import NDArray
 from sklearn.metrics import precision_score
 import polars as pl
 
+from sklearn.metrics import confusion_matrix
+
 def precision_at(y_true:NDArray[np.float64], y_pred:NDArray[np.float64], threshold:float):
     """
     choice of threshold depends on the regression dataset
@@ -18,6 +20,15 @@ def precision_at(y_true:NDArray[np.float64], y_pred:NDArray[np.float64], thresho
     #print('---------------------')
 
     return precision_score(y_t_alt, y_p_alt)
+
+def true_positive_at(y_true:NDArray[np.float64], y_pred:NDArray[np.float64], threshold:float):
+    y_t_alt = (y_true > threshold)
+    y_p_alt = (y_pred > threshold)
+    cm = confusion_matrix(y_t_alt, y_p_alt)
+    # Extract TP, TN, FP, FN
+    tn, fp, fn, tp = cm.ravel()
+    return float(tp)
+
 
 def monthly_win_ratio_avg(
     y_true:NDArray[np.float64], 
@@ -42,6 +53,8 @@ def monthly_win_ratio_avg(
     #print(agg)
     agg = agg.select(pl.col('TP')/(pl.col('TP')+pl.col('FP'))).drop_nans()
     #print(agg)
+    if agg['TP'].len() == 0: # tp should be relabeled as precision here
+        return 0
     return agg.mean().item()
 
 def monthly_win_ratio_std(
@@ -62,6 +75,8 @@ def monthly_win_ratio_std(
         ((pl.col('true')!=pl.col('predict')) & (pl.col('true')==False)).cast(pl.Int32).sum().alias('FP'), 
     ).select(pl.col('TP')/(pl.col('TP')+pl.col('FP'))).drop_nans()
     #print(agg)
+    if agg['TP'].len() == 0: # tp should be relabeled as precision here
+        return 0
     return agg.std().item()
 
 import functools as ft

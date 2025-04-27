@@ -302,7 +302,7 @@ print('start adx')
 lv2 = adx(lv2)
 lv2.write_parquet('full_df_debug.pl.parquet')
 # -------------------------------- entry_exit_calc
-"""
+
 print('start entry exit calc')
 lv2 = (
     lv2.with_columns(
@@ -340,4 +340,3 @@ if lazy:
     lv4 = lv4.select(pl.col("*")).collect()
 lv4.write_parquet('full_df_debug.pl.parquet')
 
-"""

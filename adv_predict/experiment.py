@@ -20,7 +20,12 @@ from sklearn.metrics import (
     mean_tweedie_deviance,
 )
 
-from metrics import precision_at, named_partial
+from metrics import precision_at, true_positive_at, named_partial 
+from metrics import (
+    monthly_win_ratio_avg, 
+    monthly_win_ratio_std
+)
+
 
 from inspect import signature, Parameter
 
@@ -48,6 +53,19 @@ eval_metrics = [
     named_partial(precision_at, threshold = 1.01),
     named_partial(precision_at, threshold = 1.05),
     named_partial(precision_at, threshold = 1.10),
+    
+    named_partial(true_positive_at, threshold = 1.01),
+    named_partial(true_positive_at, threshold = 1.05),
+    named_partial(true_positive_at, threshold = 1.10),
+
+    named_partial(monthly_win_ratio_avg, threshold = 1.01),
+    named_partial(monthly_win_ratio_avg, threshold = 1.05),
+    named_partial(monthly_win_ratio_avg, threshold = 1.10),
+
+    named_partial(monthly_win_ratio_std, threshold = 1.01),
+    named_partial(monthly_win_ratio_std, threshold = 1.05),
+    named_partial(monthly_win_ratio_std, threshold = 1.10),
+    
     #named_partial(precision_at ),
     mean_absolute_error,
     mean_squared_error,
@@ -81,7 +99,7 @@ def objective(trial:optuna.Trial):
     
     elif regressor_type == 'DecisionTreeRegressor':
         sub_params = {
-            'max_depth'   : trial.suggest_int("max_depth", 2, 10, 1),
+            'max_depth'   : trial.suggest_int("max_depth", 2, 10, step = 1),
             'criterion'       : trial.suggest_categorical("criterion", ['squared_error', 'friedman_mse', 'absolute_error', 'poisson']),
         }
         clf = DecisionTreeRegressor(**sub_params)
@@ -154,10 +172,10 @@ def objective(trial:optuna.Trial):
         available_args = {
             'y_true': Y_validate,
             'y_pred': Y_validate_predict,
-            'dates': validate['Date'],  # Ensure this is the correct key for dates
+            'date': validate['Date'],  # Ensure this is the correct key for dates
         }
         res = {}
-
+        #print('-------------')
         for func in eval_metrics:
             sig = signature(func)
             params = sig.parameters
@@ -171,27 +189,31 @@ def objective(trial:optuna.Trial):
                     # Handle missing required parameters (if any)
                     raise ValueError(f"Missing required parameter '{param_name}' for {func.__name__}")
             # Call the function with the collected arguments
+            #print(func.__name__)
+            #print(kwargs.keys())
             try:
                 metric_value = func(**kwargs)
             except Exception as e:
                 print(f"Error evaluating {func.__name__}: {e}")
                 raise e
                 #continue
-            
+            #print(func.__name__,metric_value)
+            #if metric_value is None:
+            #    print(available_args)
             # Store and log the result
             res[f"{func.__name__}"] = metric_value
             mlflow.log_metric(f"{func.__name__}", metric_value)
 
 
-        for func in eval_metrics:
-            res[f"{func.__name__}"] = func(Y_validate, Y_validate_predict)
-            mlflow.log_metric(f"{func.__name__}", func(Y_validate, Y_validate_predict))
+        #for func in eval_metrics:
+        #    res[f"{func.__name__}"] = func(Y_validate, Y_validate_predict)
+        #    mlflow.log_metric(f"{func.__name__}", func(Y_validate, Y_validate_predict))
         
-        signature = infer_signature(X_train, Y_train) 
+        sig = infer_signature(X_train, Y_train) 
 
         models[trial.study.study_name][trial.number] = clf
         # Log model
-        mlflow.sklearn.log_model(clf, "model", signature=signature)
+        mlflow.sklearn.log_model(clf, "model", signature=sig)
 
     return res[eval_metrics[0].__name__]
     #return res['mean_poisson_deviance']#{"loss": eval_rmse, "status": STATUS_OK, "model": model}
