@@ -23,7 +23,9 @@ from sklearn.metrics import (
 from metrics import precision_at, true_positive_at, named_partial 
 from metrics import (
     monthly_win_ratio_avg, 
-    monthly_win_ratio_std
+    monthly_win_ratio_std,
+    mthly_rtrn_pct_avg,
+    mthly_rtrn_pct_std,
 )
 
 
@@ -34,6 +36,14 @@ from inspect import signature, Parameter
 # track parameter and result
 import mlflow
 from mlflow.models import infer_signature
+
+
+# artifacts
+from sklearn.inspection import permutation_importance
+import matplotlib.pyplot as plt
+
+
+
 mlflow.set_tracking_uri('http://localhost:5000')
 
 parquet_file = Path("/home/sean/Projects/streambt/full_df_debug.pl.parquet")
@@ -65,6 +75,15 @@ eval_metrics = [
     named_partial(monthly_win_ratio_std, threshold = 1.01),
     named_partial(monthly_win_ratio_std, threshold = 1.05),
     named_partial(monthly_win_ratio_std, threshold = 1.10),
+
+    named_partial(mthly_rtrn_pct_avg, threshold = 1.01),
+    named_partial(mthly_rtrn_pct_avg, threshold = 1.05),
+    named_partial(mthly_rtrn_pct_avg, threshold = 1.10),
+
+    named_partial(mthly_rtrn_pct_std, threshold = 1.01),
+    named_partial(mthly_rtrn_pct_std, threshold = 1.05),
+    named_partial(mthly_rtrn_pct_std, threshold = 1.10),
+
     
     #named_partial(precision_at ),
     mean_absolute_error,
@@ -198,8 +217,9 @@ def objective(trial:optuna.Trial):
                 raise e
                 #continue
             #print(func.__name__,metric_value)
-            #if metric_value is None:
-            #    print(available_args)
+            if metric_value is None:
+                print(func.__name__,metric_value)
+                print(available_args)
             # Store and log the result
             res[f"{func.__name__}"] = metric_value
             mlflow.log_metric(f"{func.__name__}", metric_value)
@@ -214,6 +234,14 @@ def objective(trial:optuna.Trial):
         models[trial.study.study_name][trial.number] = clf
         # Log model
         mlflow.sklearn.log_model(clf, "model", signature=sig)
+
+        # Log additional artifacts (plots, text, matrices)
+        # takes too long, consider subsets?
+        # mlflow.shap.log_explanation(clf.predict, X_train)
+        #pr = permutation_importance(clf, X_validate, Y_validate, n_repeats=30, random_state=0)
+        #perm_sorted_idx = pr.importances_mean.argsort()
+        #fig = 
+        #mlflow.log_figure()
 
     return res[eval_metrics[0].__name__]
     #return res['mean_poisson_deviance']#{"loss": eval_rmse, "status": STATUS_OK, "model": model}
