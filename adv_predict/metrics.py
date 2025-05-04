@@ -85,7 +85,7 @@ def mthly_rtrn_pct_std(
     agg = df.filter(pl.col('predict')==True).group_by(pl.col('date').dt.month_start()).agg( 
         pl.col('true_pct').mean()
     )
-    res = agg.select('true_pct').std().item()
+    res = agg.select('true_pct').std(ddof=0).item()
     if agg['true_pct'].len() == 0:
         return 0
     if res is None:
@@ -160,7 +160,7 @@ monthly_win_ratio_std threshold_1.01 None"""
     #print(agg)
     if agg['TP'].len() == 0: # tp should be relabeled as precision here
         return 0
-    res = agg.std().item()
+    res = agg.std(ddof=0).item()
     if res is None:
         print('debug win std:')
         print(agg, res)
