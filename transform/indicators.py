@@ -144,8 +144,8 @@ def adx(df:pl.DataFrame):
             on=[pl.col('Date'),pl.col('Ticker')]
         )
         .with_columns(
-            PDI = pl.col('PDM').ewm_mean(com=14-1).over(**over_params)/pl.col('_ATR'),
-            NDI = pl.col('NDM').ewm_mean(com=14-1).over(**over_params)/pl.col('_ATR')
+            PDI = pl.when(pl.col('_ATR')!=0).then(pl.col('PDM').ewm_mean(com=14-1).over(**over_params)/pl.col('_ATR')).otherwise(None),
+            NDI = pl.when(pl.col('_ATR')!=0).then(pl.col('NDM').ewm_mean(com=14-1).over(**over_params)/pl.col('_ATR')).otherwise(None),
         )
         .with_columns(
             DX = (pl.col('PDI')-pl.col('NDI')).abs()/(pl.col('PDI')+pl.col('NDI')).abs()
@@ -193,14 +193,29 @@ def supertrend(df:pl.DataFrame, atr_period=14, multiplier=3):
             on=[pl.col('Date'),pl.col('Ticker')]
         )
         .with_columns(
-            st_upper = ( (pl.col('High')+pl.col('Low'))/2 + multiplier*pl.col('_ATR') )
-                .shift(1).over(partition_by=pl.col('Ticker'),order_by=pl.col("Date")),
-            st_lower = ( (pl.col('High')+pl.col('Low'))/2 - multiplier*pl.col('_ATR') )
-                .shift(1).over(partition_by=pl.col('Ticker'),order_by=pl.col("Date"))
+            st_upper_band = ( (pl.col('High')+pl.col('Low'))/2 + multiplier*pl.col('_ATR') )
+                .shift(1).rolling_min(window_size=atr_period).over(partition_by=pl.col('Ticker'),order_by=pl.col("Date")),
+            st_lower_band = ( (pl.col('High')+pl.col('Low'))/2 - multiplier*pl.col('_ATR') )
+                .shift(1).rolling_max(window_size=atr_period).over(partition_by=pl.col('Ticker'),order_by=pl.col("Date"))
+        )
+        .with_columns(
+            st_up_diff_norm = pl.when(pl.col('_ATR')!=0).then(pl.col('st_upper_band')/pl.col('_ATR')).otherwise(None),
+            st_lo_diff_norm = pl.when(pl.col('_ATR')!=0).then(pl.col('st_lower_band')/pl.col('_ATR')).otherwise(None)
         )
         .drop([
             '_TR',
             '_ATR',
+            'st_upper_band',
+            'st_lower_band',
         ])
     )
+    #tmp = (
+    #    tmp.join(
+    #        tmp.rolling(index_column='Date',period=f'{14}i',group_by='Ticker').agg(
+    #            pl.col('st_upper').min().alias('st_upper_min'),
+    #            pl.col('st_lower').max().alias('st_lower_max'),
+    #        ),
+    #        on=[pl.col('Date'),pl.col('Ticker')]
+    #    )
+    #)
     return tmp 

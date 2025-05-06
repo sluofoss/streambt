@@ -170,7 +170,7 @@ import functools as ft
 def named_partial(func, *args, **kwargs):
     f = ft.partial(func, *args, **kwargs) 
     #f.__name__ = f"{f.func.__name__}({",".join(list(args)+[f"{k}={v}" for k,v in kwargs.items()])})"
-    f.__name__ = f"{f.func.__name__} {"__".join(list(args)+[f"{k}_{v}" for k,v in kwargs.items()])}"
+    f.__name__ = f"{f.func.__name__}__{"__".join(list(args)+[f"{k}_{v}" for k,v in kwargs.items()])}"
     # WARNING: for parameter 'name' supplied: Names may only contain alphanumerics, underscores (_), dashes (-), periods (.), spaces ( ), colon(:) and slashes (/).
     
     # TODO decide whether it should include unfilled partial arguments here 
