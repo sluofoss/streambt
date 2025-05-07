@@ -5,6 +5,7 @@ import polars as pl
 
 from sklearn.metrics import confusion_matrix
 
+#TODO: add median or replace avg with median. 
 def precision_at(y_true:NDArray[np.float64], y_pred:NDArray[np.float64], threshold:float):
     """
     choice of threshold depends on the regression dataset

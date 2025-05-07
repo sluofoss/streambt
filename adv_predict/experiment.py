@@ -39,7 +39,7 @@ from mlflow.models import infer_signature
 
 
 # artifacts
-from figures import plot_perm_importance, plot_monthly_return, plot_monthly_return_table
+from figures import plot_perm_importance, plot_monthly_return, plot_monthly_return_table, plot_yearly_return, plot_yearly_return_table
 
 
 
@@ -161,6 +161,20 @@ def objective(trial:optuna.Trial):
     # data_load
     feature_target = db.sql(
     f"""
+    with extra as (
+        select 
+        *
+        , sum(cap_xchgd_approx)                over (partition by Ticker order by Date rows between 5*52 preceding and current row) as yearly_cap_xchngd
+        
+        , stddev_samp(log(Volume+1))                    over (partition by Ticker order by Date rows between 5*52 preceding and current row) as std_vol
+        , log(Volume + 1)                               as log_vol
+        
+        , stddev_samp(log(cap_xchgd_approx+100))        over (partition by Ticker order by Date rows between 5*52 preceding and current row) as std_cap
+        , log(cap_xchgd_approx + 100)                   as log_cap
+
+        from full_df
+        
+    )
     select 
         TMF_w                           ::DOUBLE
         , TMF_4w_min                    ::DOUBLE
@@ -191,16 +205,19 @@ def objective(trial:optuna.Trial):
         , st_up_diff_norm
         , st_lo_diff_norm
  
-        , stddev_samp(log(Volume+1))                    over (partition by Ticker order by Date rows between 5*52 preceding and current row) as std_vol
-        , log(Volume + 1)                               as log_vol
-        , stddev_samp(log(cap_xchgd_approx+100))        over (partition by Ticker order by Date rows between 5*52 preceding and current row) as std_cap
-        , log(cap_xchgd_approx + 100)                   as log_cap
+        --, yearly_cap_xchngd
+        , log(yearly_cap_xchngd+100) as log_year_cap
+        , std_vol
+        , log_vol
+        , std_cap
+        , log_cap
+        
         , cast(dayofweek(Date) as DOUBLE)               as day_of_week
         , Date
         , Ticker
         , exit_gain_loss::DOUBLE                            as exit_gain_loss             
         , exit_gain_loss::DOUBLE                            as target
-    from full_df
+    from extra
     where TMF_Simple_Signal = 1
     --and Ticker in string 
     """
@@ -267,10 +284,16 @@ def objective(trial:optuna.Trial):
         # mlflow.shap.log_explanation(clf.predict, X_train)
 
         mlflow.log_figure(plot_perm_importance(clf, X_validate, Y_validate, X_train.columns), 'perm_importance.png')
+        
         mlflow.log_figure(plot_monthly_return(Y_validate, Y_validate_predict, 1.05, validate['Date']), 'vldt_monthly_return.png')
         mlflow.log_figure(plot_monthly_return_table(Y_validate, Y_validate_predict, 1.05, validate['Date']), 'vldt_monthly_return_table.png')
         mlflow.log_figure(plot_monthly_return(Y_test, Y_test_predict, 1.05, test['Date']), 'test_monthly_return.png')
         mlflow.log_figure(plot_monthly_return_table(Y_test, Y_test_predict, 1.05, test['Date']), 'test_monthly_return_table.png')
+
+        mlflow.log_figure(plot_yearly_return(Y_validate, Y_validate_predict, 1.05, validate['Date']), 'vldt_yearly_return.png')
+        mlflow.log_figure(plot_yearly_return_table(Y_validate, Y_validate_predict, 1.05, validate['Date']), 'vldt_yearly_return_table.png')
+        mlflow.log_figure(plot_yearly_return(Y_test, Y_test_predict, 1.05, test['Date']), 'test_yearly_return.png')
+        mlflow.log_figure(plot_yearly_return_table(Y_test, Y_test_predict, 1.05, test['Date']), 'test_yearly_return_table.png')        
 
 
     return res[eval_metrics[0].__name__]
